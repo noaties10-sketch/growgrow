@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>장비 수집 로그라이크</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.70.0/dist/phaser.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a2e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+
+        #game-container {
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+    
+    <script>
+        // ========================================
+        // 게임 데이터 & 설정
+        // ========================================
+
+        // 아이템 등급별 스탯
+        const ITEM_STATS = {
+            sword: [
+                { tier: 1, power: 10, color: 0x9b59b6, name: '일반' },      // 보라색
+                { tier: 2, power: 20, color: 0x3498db, name: '희귀' },      // 남색
+                { tier: 3, power: 40, color: 0x2980b9, name: '레어' },      // 파란색
+                { tier: 4, power: 80, color: 0x2ecc71, name: '에픽' },      // 초록색
+                { tier: 5, power: 160, color: 0x1abc9c, name: '전설' },     // 연두색
+            ]
+        };
+
+        // 게임 데이터 저장소
+        let gameData = {
+            inventory: [],
+            equipped: {
+                sword: null
+            },
+            highestWave: 0,
+            showController: true  // 컨트롤러 표시 여부
+        };
+
+        // LocalStorage에서 데이터 로드
+        function loadGameData() {
+            const saved = localStorage.getItem('roguelikeGameData');
+            if (saved) {
+                try {
+                    gameData = JSON.parse(saved);
+                    // 컨트롤러 설정이 없으면 기본값 설정
+                    if (gameData.showController === undefined) {
+                        gameData.showController = true;
+                    }
+                } catch (e) {
+                    console.log('데이터 로드 실패, 초기화합니다');
+                }
+            }
+        }
+
+        // LocalStorage에 데이터 저장
+        function saveGameData() {
+            localStorage.setItem('roguelikeGameData', JSON.stringify(gameData));
+        }
+
+        // 초기 로드
+        loadGameData();
+
+        // ========================================
+        // 메인 화면 Scene
+        // ========================================
+
+        class MainScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'MainScene' });
+            }
+
+            create() {
+                // 배경
+                this.add.rectangle(600, 400, 1200, 800, 0x0f0f1e);
+                
+                // 제목
+                this.add.text(600, 80, '⚔️ 장비 수집 로그라이크 ⚔️', {
+                    fontSize: '36px',
+                    fill: '#fff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                // 캐릭터 표시
+                this.add.text(600, 200, '👤 내 캐릭터', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                this.add.circle(600, 270, 30, 0x00aaff);
+                
+                // 장착 아이템 표시
+                this.showEquippedItems();
+
+                // 스탯 표시
+                this.showStats();
+
+                // 버튼들
+                this.createButtons();
+
+                // 최고 웨이브 표시
+                this.add.text(600, 700, `최고 기록: Wave ${gameData.highestWave}`, {
+                    fontSize: '18px',
+                    fill: '#ffaa00'
+                }).setOrigin(0.5);
+
+                // 컨트롤러 설정 버튼
+                this.createControllerToggle();
+            }
+
+            createButtons() {
+                // 게임 시작 버튼
+                const playBtn = this.add.rectangle(600, 550, 250, 60, 0x00ff00)
+                    .setInteractive({ useHandCursor: true });
+                this.add.text(600, 550, '게임 시작', {
+                    fontSize: '28px',
+                    fill: '#000'
+                }).setOrigin(0.5);
+                
+                playBtn.on('pointerdown', () => {
+                    this.scene.start('PlayScene');
+                });
+
+                // 인벤토리 버튼
+                const inventoryBtn = this.add.rectangle(300, 550, 200, 50, 0x0088ff)
+                    .setInteractive({ useHandCursor: true });
+                this.add.text(300, 550, '인벤토리', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                inventoryBtn.on('pointerdown', () => {
+                    this.openInventory();
+                });
+
+                // 합성 버튼
+                const synthesisBtn = this.add.rectangle(900, 550, 200, 50, 0xff00ff)
+                    .setInteractive({ useHandCursor: true });
+                this.add.text(900, 550, '합성', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                synthesisBtn.on('pointerdown', () => {
+                    this.openSynthesis();
+                });
+            }
+
+            createControllerToggle() {
+                const toggleBtn = this.add.rectangle(600, 630, 250, 40, gameData.showController ? 0x00ff00 : 0xff0000)
+                    .setInteractive({ useHandCursor: true });
+                
+                const toggleText = this.add.text(600, 630, 
+                    `모바일 컨트롤러: ${gameData.showController ? 'ON' : 'OFF'}`, {
+                    fontSize: '18px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                toggleBtn.on('pointerdown', () => {
+                    gameData.showController = !gameData.showController;
+                    saveGameData();
+                    toggleBtn.setFillStyle(gameData.showController ? 0x00ff00 : 0xff0000);
+                    toggleText.setText(`모바일 컨트롤러: ${gameData.showController ? 'ON' : 'OFF'}`);
+                });
+            }
+
+            showEquippedItems() {
+                let y = 330;
+                
+                // 칼만 표시
+                const sword = gameData.equipped.sword;
+                const swordText = sword ? ITEM_STATS.sword[sword - 1].name : '없음';
+                const swordColor = sword ? '#' + ITEM_STATS.sword[sword - 1].color.toString(16).padStart(6, '0') : '#888888';
+                this.add.text(600, y, `⚔️ ${swordText}`, {
+                    fontSize: '18px',
+                    fill: swordColor
+                }).setOrigin(0.5);
+            }
+
+            showStats() {
+                const stats = this.calculateStats();
+                this.add.text(600, 380, `공격력: ${stats.power}`, {
+                    fontSize: '20px',
+                    fill: '#ffff00'
+                }).setOrigin(0.5);
+            }
+
+            calculateStats() {
+                let power = 10; // 기본 공격력
+
+                if (gameData.equipped.sword) {
+                    power += ITEM_STATS.sword[gameData.equipped.sword - 1].power;
+                }
+
+                return { power };
+            }
+
+            openInventory() {
+                this.add.rectangle(600, 400, 1200, 800, 0x000000, 0.8);
+                this.add.rectangle(600, 400, 900, 650, 0x1a1a2e);
+                
+                this.add.text(600, 100, '📦 인벤토리', {
+                    fontSize: '28px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                this.add.text(600, 150, '아이템을 클릭하여 장착', {
+                    fontSize: '16px',
+                    fill: '#aaa'
+                }).setOrigin(0.5);
+
+                // 아이템 묶기 (tier별로 개수 계산)
+                const grouped = {};
+                gameData.inventory.forEach(item => {
+                    const key = item.tier;
+                    if (!grouped[key]) {
+                        grouped[key] = [];
+                    }
+                    grouped[key].push(item);
+                });
+
+                // 아이템 그리드
+                let x = 250;
+                let y = 220;
+                const itemsPerRow = 6;
+                let index = 0;
+
+                Object.keys(grouped).forEach(tier => {
+                    const items = grouped[tier];
+                    const count = items.length;
+                    const itemData = ITEM_STATS.sword[tier - 1];
+
+                    const box = this.add.rectangle(x, y, 80, 80, itemData.color)
+                        .setInteractive({ useHandCursor: true });
+
+                    this.add.text(x, y - 18, '⚔️', {
+                        fontSize: '24px'
+                    }).setOrigin(0.5);
+
+                    this.add.text(x, y + 5, itemData.name, {
+                        fontSize: '14px',
+                        fill: '#fff'
+                    }).setOrigin(0.5);
+
+                    this.add.text(x, y + 25, `x${count}`, {
+                        fontSize: '14px',
+                        fill: '#ffff00'
+                    }).setOrigin(0.5);
+
+                    // 클릭 시 → 같은 티어 중 하나만 장착
+                    box.on('pointerdown', () => {
+                        const realIndex = gameData.inventory.findIndex(i => i.tier == tier);
+                        this.equipItem(gameData.inventory[realIndex], realIndex);
+                        this.scene.restart();
+                    });
+
+                    x += 100;
+                    index++;
+                    if (index % itemsPerRow === 0) {
+                        x = 250;
+                        y += 100;
+                    }
+                });
+
+                // 닫기 버튼
+                const closeBtn = this.add.rectangle(600, 680, 150, 40, 0xff0000)
+                    .setInteractive({ useHandCursor: true });
+                this.add.text(600, 680, '닫기', {
+                    fontSize: '20px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                closeBtn.on('pointerdown', () => {
+                    this.scene.restart();
+                });
+            }
+
+            equipItem(item, inventoryIndex) {
+                if (item.type === 'sword') {
+                    if (gameData.equipped.sword) {
+                        gameData.inventory.push({ type: 'sword', tier: gameData.equipped.sword });
+                    }
+                    gameData.equipped.sword = item.tier;
+                    gameData.inventory.splice(inventoryIndex, 1);
+                }
+                saveGameData();
+            }
+
+            openSynthesis() {
+                this.add.rectangle(600, 400, 1200, 800, 0x000000, 0.8);
+                this.add.rectangle(600, 400, 900, 650, 0x1a1a2e);
+                
+                this.add.text(600, 100, '🔮 아이템 합성', {
+                    fontSize: '28px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                this.add.text(600, 150, '같은 종류 5개를 합성하여 상위 아이템 획득! (성공률 60%)', {
+                    fontSize: '16px',
+                    fill: '#aaa'
+                }).setOrigin(0.5);
+
+                // 합성 가능한 아이템 찾기
+                const itemCounts = {};
+                gameData.inventory.forEach(item => {
+                    const key = `sword_${item.tier}`;
+                    itemCounts[key] = (itemCounts[key] || 0) + 1;
+                });
+
+                let y = 220;
+                let hasItems = false;
+                
+                Object.keys(itemCounts).forEach(key => {
+                    const tier = parseInt(key.split('_')[1]);
+                    const count = itemCounts[key];
+                    const itemData = ITEM_STATS.sword[tier - 1];
+
+                    if (count >= 5 && tier < 5) {
+                        hasItems = true;
+                        const btn = this.add.rectangle(600, y, 500, 50, itemData.color)
+                            .setInteractive({ useHandCursor: true });
+                        
+                        this.add.text(600, y, `${itemData.name} x${count} → 합성하기`, {
+                            fontSize: '18px',
+                            fill: '#fff'
+                        }).setOrigin(0.5);
+
+                        btn.on('pointerdown', () => {
+                            this.synthesize(tier);
+                        });
+
+                        y += 60;
+                    }
+                });
+
+                if (!hasItems) {
+                    this.add.text(600, 350, '합성 가능한 아이템이 없습니다\n(같은 종류 5개 필요)', {
+                        fontSize: '20px',
+                        fill: '#ff8888',
+                        align: 'center'
+                    }).setOrigin(0.5);
+                }
+
+                // 닫기 버튼
+                const closeBtn = this.add.rectangle(600, 680, 150, 40, 0xff0000)
+                    .setInteractive({ useHandCursor: true });
+                this.add.text(600, 680, '닫기', {
+                    fontSize: '20px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                closeBtn.on('pointerdown', () => {
+                    this.scene.restart();
+                });
+            }
+
+            synthesize(tier) {
+                let removed = 0;
+                gameData.inventory = gameData.inventory.filter(item => {
+                    if (item.tier === tier && removed < 5) {
+                        removed++;
+                        return false;
+                    }
+                    return true;
+                });
+
+                if (Math.random() < 0.6) {
+                    gameData.inventory.push({ type: 'sword', tier: tier + 1 });
+                    alert(`✨ 합성 성공! ${ITEM_STATS.sword[tier].name} 획득!`);
+                } else {
+                    alert('💥 합성 실패... 아이템이 소멸했습니다');
+                }
+
+                saveGameData();
+                this.scene.restart();
+            }
+        }
+
+        // ========================================
+        // 플레이 화면 Scene
+        // ========================================
+
+        class PlayScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'PlayScene' });
+            }
+
+            create() {
+                this.add.rectangle(600, 400, 1200, 800, 0x2a2a3e);
+
+                const stats = this.calculateStats();
+                
+                this.playerMaxHp = 100;
+                this.playerHp = 100;
+                this.playerPower = stats.power;
+
+                this.player = this.add.circle(600, 400, 20, 0x00aaff);
+                this.physics.add.existing(this.player);
+                this.player.body.setCollideWorldBounds(true);
+                this.player.body.setCircle(20);
+                this.player.body.setBounce(0);
+
+                this.sword = this.add.rectangle(0, 0, 40, 10, 0xffff00);
+                this.sword.visible = false;
+
+                // 검 쿨다운 추가
+                this.swordCooldown = 0;
+                this.swordCooldownMax = 1000; // 1초
+
+                this.cursors = this.input.keyboard.createCursorKeys();
+                this.input.on('pointerdown', (pointer) => {
+                    this.swingSword(pointer.x, pointer.y);
+                });
+
+                this.wave = 1;
+                this.monstersKilled = 0;
+                this.monsters = this.physics.add.group();
+                this.droppedItems = this.physics.add.group();
+
+                this.waveText = this.add.text(600, 20, `Wave ${this.wave}`, {
+                    fontSize: '28px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                this.hpText = this.add.text(20, 20, `HP: ${this.playerHp}/${this.playerMaxHp}`, {
+                    fontSize: '20px',
+                    fill: '#00ff00'
+                });
+
+                this.statsText = this.add.text(20, 50, `공격력: ${this.playerPower}`, {
+                    fontSize: '16px',
+                    fill: '#ffff00'
+                });
+
+                this.cooldownText = this.add.text(20, 80, `쿨다운: 준비`, {
+                    fontSize: '16px',
+                    fill: '#00ff00'
+                });
+
+                this.spawnWave();
+
+                this.physics.add.collider(
+                    this.player,
+                    this.monsters,
+                    this.onPlayerMonsterCollide,
+                    null,
+                    this
+                );
+
+                this.physics.add.overlap(
+                    this.player,
+                    this.droppedItems,
+                    this.collectItem,
+                    null,
+                    this
+                );
+
+                this.physics.add.collider(this.monsters, this.monsters);
+
+                // 모바일 컨트롤러 생성
+                if (gameData.showController) {
+                    this.createMobileController();
+                }
+            }
+
+            createMobileController() {
+                // 방향 버튼
+                const btnSize = 60;
+                const btnPadding = 70;
+                const baseX = 100;
+                const baseY = 650;
+
+                // 위
+                this.upBtn = this.add.rectangle(baseX, baseY - btnPadding, btnSize, btnSize, 0x444444, 0.7)
+                    .setInteractive()
+                    .setScrollFactor(0);
+                this.add.text(baseX, baseY - btnPadding, '▲', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5).setScrollFactor(0);
+
+                // 아래
+                this.downBtn = this.add.rectangle(baseX, baseY + btnPadding, btnSize, btnSize, 0x444444, 0.7)
+                    .setInteractive()
+                    .setScrollFactor(0);
+                this.add.text(baseX, baseY + btnPadding, '▼', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5).setScrollFactor(0);
+
+                // 왼쪽
+                this.leftBtn = this.add.rectangle(baseX - btnPadding, baseY, btnSize, btnSize, 0x444444, 0.7)
+                    .setInteractive()
+                    .setScrollFactor(0);
+                this.add.text(baseX - btnPadding, baseY, '◀', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5).setScrollFactor(0);
+
+                // 오른쪽
+                this.rightBtn = this.add.rectangle(baseX + btnPadding, baseY, btnSize, btnSize, 0x444444, 0.7)
+                    .setInteractive()
+                    .setScrollFactor(0);
+                this.add.text(baseX + btnPadding, baseY, '▶', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5).setScrollFactor(0);
+
+                // 공격 버튼
+                this.attackBtn = this.add.circle(1100, 680, 50, 0xff0000, 0.7)
+                    .setInteractive()
+                    .setScrollFactor(0);
+                this.add.text(1100, 680, '⚔', {
+                    fontSize: '32px',
+                    fill: '#fff'
+                }).setOrigin(0.5).setScrollFactor(0);
+
+                this.attackBtn.on('pointerdown', () => {
+                    // 플레이어 앞쪽으로 공격
+                    const angle = this.player.body.velocity.angle() || 0;
+                    const targetX = this.player.x + Math.cos(angle) * 100;
+                    const targetY = this.player.y + Math.sin(angle) * 100;
+                    this.swingSword(targetX, targetY);
+                });
+
+                // 방향 입력 상태
+                this.mobileInput = {
+                    up: false,
+                    down: false,
+                    left: false,
+                    right: false
+                };
+
+                this.upBtn.on('pointerdown', () => { this.mobileInput.up = true; });
+                this.upBtn.on('pointerup', () => { this.mobileInput.up = false; });
+                this.upBtn.on('pointerout', () => { this.mobileInput.up = false; });
+
+                this.downBtn.on('pointerdown', () => { this.mobileInput.down = true; });
+                this.downBtn.on('pointerup', () => { this.mobileInput.down = false; });
+                this.downBtn.on('pointerout', () => { this.mobileInput.down = false; });
+
+                this.leftBtn.on('pointerdown', () => { this.mobileInput.left = true; });
+                this.leftBtn.on('pointerup', () => { this.mobileInput.left = false; });
+                this.leftBtn.on('pointerout', () => { this.mobileInput.left = false; });
+
+                this.rightBtn.on('pointerdown', () => { this.mobileInput.right = true; });
+                this.rightBtn.on('pointerup', () => { this.mobileInput.right = false; });
+                this.rightBtn.on('pointerout', () => { this.mobileInput.right = false; });
+            }
+
+            calculateStats() {
+                let power = 10;
+
+                if (gameData.equipped.sword) {
+                    power += ITEM_STATS.sword[gameData.equipped.sword - 1].power;
+                }
+
+                return { power };
+            }
+
+            update(time, delta) {
+                const speed = 200;
+                this.player.body.setVelocity(0);
+
+                // 키보드 입력
+                if (this.cursors.left.isDown) {
+                    this.player.body.setVelocityX(-speed);
+                } else if (this.cursors.right.isDown) {
+                    this.player.body.setVelocityX(speed);
+                }
+
+                if (this.cursors.up.isDown) {
+                    this.player.body.setVelocityY(-speed);
+                } else if (this.cursors.down.isDown) {
+                    this.player.body.setVelocityY(speed);
+                }
+
+                // 모바일 입력
+                if (gameData.showController && this.mobileInput) {
+                    if (this.mobileInput.left) {
+                        this.player.body.setVelocityX(-speed);
+                    } else if (this.mobileInput.right) {
+                        this.player.body.setVelocityX(speed);
+                    }
+
+                    if (this.mobileInput.up) {
+                        this.player.body.setVelocityY(-speed);
+                    } else if (this.mobileInput.down) {
+                        this.player.body.setVelocityY(speed);
+                    }
+                }
+
+                // 쿨다운 업데이트
+                if (this.swordCooldown > 0) {
+                    this.swordCooldown -= delta;
+                    const cooldownPercent = Math.ceil((this.swordCooldown / this.swordCooldownMax) * 100);
+                    this.cooldownText.setText(`쿨다운: ${Math.max(0, cooldownPercent)}%`);
+                    this.cooldownText.setColor('#ff0000');
+                } else {
+                    this.cooldownText.setText(`쿨다운: 준비`);
+                    this.cooldownText.setColor('#00ff00');
+                }
+
+                // 몬스터 AI: 어그로 상태일 때만 쫓아감
+                this.monsters.children.entries.forEach(monster => {
+                    if (monster.active && monster.aggro) {
+                        this.physics.moveToObject(monster, this.player, 50 + this.wave * 5);
+                    }
+                    
+                    if (monster.hpBar) {
+                        monster.hpBar.x = monster.x;
+                        monster.hpBar.y = monster.y - 25;
+                    }
+                });
+            }
+
+            spawnWave() {
+                this.monstersKilled = 0;
+                const monstersToSpawn = 5 + this.wave * 2;
+                this.totalMonstersInWave = monstersToSpawn;
+
+                for (let i = 0; i < monstersToSpawn; i++) {
+                    this.time.delayedCall(i * 500, () => {
+                        this.spawnMonster();
+                    });
+                }
+            }
+
+            spawnMonster() {
+                const x = Phaser.Math.Between(50, 1150);
+                const y = Phaser.Math.Between(50, 750);
+                
+                const monster = this.add.circle(x, y, 15, 0xff0000);
+                this.physics.add.existing(monster);
+                monster.body.setCircle(15);
+                monster.body.setBounce(0);
+                monster.body.setImmovable(false);
+
+                monster.hp = 20 + this.wave * 10;
+                monster.maxHp = monster.hp;
+                monster.power = 5 + this.wave * 2;
+                monster.tier = Math.min(Math.ceil(this.wave / 3), 5);
+                monster.lastHitTime = 0;
+                monster.aggro = false; // 처음에는 어그로 없음
+
+                this.monsters.add(monster);
+
+                monster.hpBar = this.add.rectangle(x, y - 25, 30, 4, 0x00ff00);
+            }
+
+            swingSword(targetX, targetY) {
+                if (this.swordCooldown > 0) {
+                    return;
+                }
+
+                this.swordCooldown = this.swordCooldownMax;
+
+                this.sword.visible = true;
+                const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, targetX, targetY);
+                
+                this.sword.x = this.player.x + Math.cos(angle) * 40;
+                this.sword.y = this.player.y + Math.sin(angle) * 40;
+                this.sword.rotation = angle;
+
+                this.monsters.children.entries.forEach(monster => {
+                    if (monster.active) {
+                        const dist = Phaser.Math.Distance.Between(this.sword.x, this.sword.y, monster.x, monster.y);
+                        if (dist < 40) {
+                            this.damageMonster(monster);
+                        }
+                    }
+                });
+
+                this.time.delayedCall(100, () => {
+                    this.sword.visible = false;
+                });
+            }
+
+            damageMonster(monster) {
+                monster.hp -= this.playerPower;
+                monster.aggro = true; // 공격받으면 어그로 활성화
+                
+                const hpPercent = monster.hp / monster.maxHp;
+                monster.hpBar.width = 30 * hpPercent;
+                monster.hpBar.fillColor = hpPercent > 0.5 ? 0x00ff00 : hpPercent > 0.25 ? 0xffff00 : 0xff0000;
+
+                if (monster.hp <= 0) {
+                    this.killMonster(monster);
+                }
+            }
+
+            killMonster(monster) {
+                // 아이템 드랍 (100% 확률)
+                if (Math.random() < 0.5) {
+                    this.dropItem(monster.x, monster.y, monster.tier);
+                }
+
+                if (monster.hpBar) {
+                    monster.hpBar.destroy();
+                }
+                monster.destroy();
+
+                this.monstersKilled++;
+                
+                if (this.monstersKilled >= this.totalMonstersInWave) {
+                    this.wave++;
+                    this.waveText.setText(`Wave ${this.wave}`);
+                    
+                    if (this.wave > gameData.highestWave) {
+                        gameData.highestWave = this.wave;
+                    }
+
+                    this.time.delayedCall(2000, () => {
+                        this.spawnWave();
+                    });
+                }
+            }
+
+            dropItem(x, y, tier) {
+                const itemData = ITEM_STATS.sword[tier - 1];
+                
+                const item = this.add.rectangle(x, y, 20, 6, itemData.color);
+                item.setRotation(0.785);
+                this.physics.add.existing(item);
+                item.body.setSize(20, 6);
+                
+                item.itemTier = tier;
+                item.itemType = 'sword';
+                
+                this.tweens.add({
+                    targets: item,
+                    scale: { from: 1, to: 1.2 },
+                    duration: 500,
+                    yoyo: true,
+                    repeat: -1
+                });
+
+                this.tweens.add({
+                    targets: item,
+                    rotation: item.rotation + Math.PI * 2,
+                    duration: 2000,
+                    repeat: -1
+                });
+
+                this.droppedItems.add(item);
+            }
+
+            collectItem(player, item) {
+                gameData.inventory.push({ 
+                    type: item.itemType, 
+                    tier: item.itemTier 
+                });
+                
+                const itemData = ITEM_STATS.sword[item.itemTier - 1];
+                const text = this.add.text(item.x, item.y - 30, `+${itemData.name}`, {
+                    fontSize: '18px',
+                    fill: '#' + itemData.color.toString(16).padStart(6, '0'),
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                this.tweens.add({
+                    targets: text,
+                    y: text.y - 50,
+                    alpha: 0,
+                    duration: 1000,
+                    onComplete: () => {
+                        text.destroy();
+                    }
+                });
+
+                item.destroy();
+            }
+
+            onPlayerMonsterCollide(player, monster) {
+                const now = this.time.now;
+
+                if (now - monster.lastHitTime < 100) return;
+
+                monster.lastHitTime = now;
+                monster.aggro = true; // 충돌 시에도 어그로 활성화
+                this.hitPlayer(monster);
+            }
+
+            hitPlayer(monster) {
+                const damage = monster.power;
+                this.playerHp -= damage;
+                this.hpText.setText(`HP: ${this.playerHp}/${this.playerMaxHp}`);
+                this.hpText.setColor(this.playerHp > this.playerMaxHp * 0.3 ? '#00ff00' : '#ff0000');
+
+                this.cameras.main.shake(100, 0.01);
+
+                if (this.playerHp <= 0) {
+                    saveGameData();
+                    this.scene.start('GameOverScene', { wave: this.wave });
+                }
+            }
+        }
+
+        // ========================================
+        // 게임 오버 Scene
+        // ========================================
+
+        class GameOverScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameOverScene' });
+            }
+
+            init(data) {
+                this.finalWave = data.wave;
+            }
+
+            create() {
+                this.add.rectangle(600, 400, 1200, 800, 0x000000);
+
+                this.add.text(600, 250, '💀 게임 오버 💀', {
+                    fontSize: '56px',
+                    fill: '#ff0000'
+                }).setOrigin(0.5);
+
+                this.add.text(600, 370, `도달 웨이브: ${this.finalWave}`, {
+                    fontSize: '28px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+
+                this.add.text(600, 430, `획득 아이템: ${gameData.inventory.length}개`, {
+                    fontSize: '24px',
+                    fill: '#ffaa00'
+                }).setOrigin(0.5);
+
+                const btn = this.add.rectangle(600, 530, 300, 70, 0x00ff00)
+                    .setInteractive({ useHandCursor: true });
+                
+                this.add.text(600, 530, '메인 화면으로', {
+                    fontSize: '28px',
+                    fill: '#000'
+                }).setOrigin(0.5);
+
+                btn.on('pointerdown', () => {
+                    this.scene.start('MainScene');
+                });
+            }
+        }
+
+        // ========================================
+        // Phaser 게임 설정
+        // ========================================
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 1200,
+            height: 800,
+            parent: 'game-container',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: [MainScene, PlayScene, GameOverScene]
+        };
+
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>
